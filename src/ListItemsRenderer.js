@@ -1,19 +1,24 @@
 var Layer = require('./Layer'),
-    LayersPool = require('./LayerPool'),
+    LayersPool = require('./layerPool'),
+    StyleHelpers = require('./StyleHelpers'),
     AnimationFrameHelper = require('./AnimationFrameHelper'),
     MIN_FPS = 30,
     MAX_TIME_PER_FRAME = 1000 / MIN_FPS;
 
-var ListItemsRenderer = function(attachedElement, scrollElement, listConfig, pageCallback){
+var ListItemsRenderer = function(attachedElement, scrollElement, listConfig, pageCallback, onRefreshStarted, onRefreshCompleted){
 
     var visibleHeight = attachedElement.clientHeight,
         itemWidth = attachedElement.clientWidth,
         renderedListItems = [],
-        layersPool = new LayersPool();
+        layersPool = new LayersPool(),
+        pullToRefreshItem = null,
+        refreshing = false,
+        prepareToRefresh = false;
 
-    function render(topOffset, atIndex, offsetFromTop, listItemsHeights){
-        var startRenderTime = new Date().getTime(),
-            minNumberOfItemsAhead = 2;
+    listConfig.pullToRefresh && renderPullToRefresh();
+
+    function render(topOffset, atIndex, offsetFromTop, isDragging){
+        var startRenderTime = new Date().getTime();
 
         if ( typeof atIndex == 'number' &&  atIndex >= 0){
             atIndex = Math.max(0, Math.min(atIndex, listConfig.itemsCount-1));
@@ -67,8 +72,12 @@ var ListItemsRenderer = function(attachedElement, scrollElement, listConfig, pag
             }
         }
 
-        //fill down
-        var bottomRenderedItem = renderedListItems[renderedListItems.length - 1];
+        if (topRenderedItem.getItemIndex() == 0) {
+            renderPullToRefresh(topOffset, topRenderedItem.getItemOffset(), isDragging);
+            //pullToRefreshItem.setItemOffset(topRenderedItem.getItemOffset() - 50);
+        }
+
+
         if (bottomRenderedItem.getItemIndex() < listConfig.itemsCount && bottomRenderedItem.getIdentifier() == "$LoadMore") {
             bottomRenderedItem = renderedListItems[renderedListItems.length - 1];
             layersPool.addLayer(renderedListItems.pop());
@@ -155,6 +164,66 @@ var ListItemsRenderer = function(attachedElement, scrollElement, listConfig, pag
         listConfig.itemRenderer(index, layer.getDomElement());
         return layer;
     }
+
+    function renderPullToRefresh(topOffset, topItemStart, isDragging) {
+
+        if (listConfig.pullToRefresh && listConfig.pullToRefresh.height) {
+            var pullToRefresh = listConfig.pullToRefresh,
+                height = pullToRefresh.height,
+                idleRenderer = pullToRefresh.idleRenderer,
+                busyRenderer = pullToRefresh.busyRenderer,
+                beginRefreshAtOffset = pullToRefresh.beginRefreshAtOffset,
+                onRefresh = pullToRefresh.onRefresh;
+
+            if (topOffset < topItemStart) {
+                if (!pullToRefreshItem) {
+                    var pullToRefreshIdenitifier = "$pullToRefresh$";
+                    pullToRefreshItem = borrowLayerForIndex(-1, pullToRefreshIdenitifier, height);
+                    idleRenderer(pullToRefreshItem.getDomElement());
+                }
+
+                var diff = topItemStart - topOffset;
+
+                if (diff >= (beginRefreshAtOffset || height) && (isDragging || prepareToRefresh) || refreshing) {
+                    busyRenderer(pullToRefreshItem.getDomElement());
+                } else {
+                    idleRenderer(pullToRefreshItem.getDomElement());
+                }
+
+                if (!refreshing && diff >= (beginRefreshAtOffset || height) && !isDragging && prepareToRefresh) {
+                    refreshing = true;
+                    // busyRenderer(pullToRefreshItem.getDomElement());
+                    onRefreshStarted(height);
+                    onRefresh(function(){
+                        refreshing = false;
+                        //idleRenderer(pullToRefreshItem.getDomElement());
+                        onRefreshCompleted();
+                    });
+                }
+
+                prepareToRefresh = isDragging;
+                pullToRefreshItem.setItemOffset(topItemStart - height);
+            }
+        }
+    }
+
+    // function startRefresh(height) {
+    //     refreshing = true;
+    //     if (listConfig.pullToRefresh.stayInView) {
+    //         StyleHelpers.applyElementStyle(scrollElement, {
+    //             top: height + "px",
+    //             transition: "top 1s"
+    //         });
+    //     }
+    // }
+    //
+    // function endRefresh() {
+    //     refreshing = false;
+    //     StyleHelpers.applyElementStyle(scrollElement, {
+    //         transition: "top 1s",
+    //         top: 0
+    //     });
+    // }
 
     /*
      Borrow a layer from the LayersPool and attach it to a certain item at index.

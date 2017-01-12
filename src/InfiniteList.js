@@ -19,7 +19,13 @@ var InfiniteList = function (listConfig) {
                 domElement.innerHTML = '<div style="margin-left:14px;height:50px">Loading...</div>';
             },
             hasMore: false,
-            useNativeScroller: false,
+            pullToRefresh: {
+                height: null,
+                idleRenderer: null,
+                busyRenderer: null,
+                beginRefreshAtOffset: null,
+                onRefresh: null
+            },
             itemsCount: 0
         },
         parentElement = null,
@@ -34,7 +40,8 @@ var InfiniteList = function (listConfig) {
         topOffset = 0,
         scrollToIndex = 0,
         topItemOffset = 0,
-        needsRender = true;
+        needsRender = true,
+        refreshing = false;
 
     for (var key in listConfig){
         if (listConfig.hasOwnProperty(key)){
@@ -178,12 +185,13 @@ var InfiniteList = function (listConfig) {
         needsRender = true;
     }
 
-    function updateScroller() {
+    function updateScroller(align) {
         var maxIndexToRender = config.itemsCount - 1 + (config.hasMore ? 1 : 0),
             renderedItems = itemsRenderer.getRenderedItems(),
             lastRenderedItem = renderedItems[renderedItems.length - 1],
             minScrollerOffset =  Number.MIN_SAFE_INTEGER,
-            maxScrollerOffset = Number.MAX_SAFE_INTEGER;
+            maxScrollerOffset = Number.MAX_SAFE_INTEGER,
+            pullToRefreshHeight = config.pullToRefresh.height;
 
         if (renderedItems.length > 0 && renderedItems[0].getItemIndex() == 0) {
                 minScrollerOffset = renderedItems[0].getItemOffset();
@@ -192,6 +200,8 @@ var InfiniteList = function (listConfig) {
         if (lastRenderedItem && lastRenderedItem.getItemIndex() == maxIndexToRender) {
                 maxScrollerOffset =  lastRenderedItem.getItemOffset() + lastRenderedItem.getItemHeight() - parentElementHeight;
         }
+
+        minScrollerOffset = refreshing ? minScrollerOffset - pullToRefreshHeight : minScrollerOffset;
 
         if (config.useNativeScroller) {
             var totalHeight = 0;
@@ -203,12 +213,14 @@ var InfiniteList = function (listConfig) {
             });
         } else {
             scroller.setDimensions(minScrollerOffset, maxScrollerOffset);
+            if (align && minScrollerOffset > topOffset) {
+                scroller.scrollTo(minScrollerOffset, true);
+            }
         }
     }
 
     function render() {
         var renderedItems;
-
         updateScroller();
         if (!config.useNativeScroller) {
             StyleHelpers.applyTransformStyle(scrollElement, 'matrix3d(1,0,0,0,0,1,0,0,0,0,1,0,0' + ',' + (-topOffset) + ', 0, 1)');
